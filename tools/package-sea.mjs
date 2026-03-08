@@ -11,7 +11,7 @@ function resolveCmd(cmd) {
 function run(cmd, args, opts = {}) {
   const res = spawnSync(resolveCmd(cmd), args, { stdio: "inherit", shell: false, ...opts });
   if (res.error) throw res.error;
-  if (res.status !== 0) throw new Error(`命令失败：${cmd} ${args.join(" ")}`);
+  if (res.status !== 0) throw new Error(`执行命令失败：${cmd} ${args.join(" ")}`);
 }
 
 function runPnpm(args) {
@@ -19,7 +19,7 @@ function runPnpm(args) {
   if (execPath && execPath.toLowerCase().includes("pnpm")) {
     const res = spawnSync(process.execPath, [execPath, ...args], { stdio: "inherit", shell: false });
     if (res.error) throw res.error;
-    if (res.status !== 0) throw new Error(`命令失败：pnpm ${args.join(" ")}`);
+    if (res.status !== 0) throw new Error(`执行命令失败：pnpm ${args.join(" ")}`);
     return;
   }
   run("pnpm", args);
@@ -78,6 +78,12 @@ const outBin = join("release", binName());
 copyFileSync(nodePath(), outBin);
 
 runPnpm(["exec", ...postjectArgs(outBin, "dist-sea/sea-prep.blob")]);
+
+// macOS 代码签名
+if (process.platform === "darwin") {
+  console.log("正在对可执行文件进行代码签名...");
+  run("codesign", ["--force", "--deep", "--sign", "-", outBin]);
+}
 
 const localesSrc = "locales";
 if (existsSync(localesSrc)) {
