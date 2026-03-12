@@ -1,4 +1,4 @@
-import { mkdir, open, readdir, rm } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 export type ReplayHeader = {
@@ -28,39 +28,54 @@ export async function ensureReplayDir(baseDir: string, userId: number, chartId: 
   return dir;
 }
 
-export async function readReplayHeader(filePath: string): Promise<ReplayHeader | null> {
-  const handle = await open(filePath, "r");
-  try {
-    const buf = Buffer.allocUnsafe(16);
-    const res = await handle.read(buf, 0, 16, 0);
-    if (res.bytesRead < 12) return null;
-
-    const magicU16 = res.bytesRead >= 2 ? buf.readUInt16LE(0) : null;
-    const isMagicPM = magicU16 === 0x504d || magicU16 === 0x4d50;
-    if (isMagicPM) {
-      if (res.bytesRead < 14) return null;
-      const chartId = buf.readUInt32LE(2);
-      const userId = buf.readUInt32LE(6);
-      const recordId = buf.readUInt32LE(10);
-      return { chartId, userId, recordId };
-    }
-
-    const isMagicPHIR = res.bytesRead >= 4 && buf[0] === 0x50 && buf[1] === 0x48 && buf[2] === 0x49 && buf[3] === 0x52;
-    if (isMagicPHIR) {
-      if (res.bytesRead < 16) return null;
-      const chartId = buf.readUInt32LE(4);
-      const userId = buf.readUInt32LE(8);
-      const recordId = buf.readUInt32LE(12);
-      return { chartId, userId, recordId };
-    }
-
-    const chartId = buf.readUInt32LE(0);
-    const userId = buf.readUInt32LE(4);
-    const recordId = buf.readUInt32LE(8);
-    return { chartId, userId, recordId };
-  } finally {
-    await handle.close();
+function readUlebNumber(buf: Buffer, offset: number): { value: number; offset: number } | null {
+  let value = 0;
+  let shift = 0;
+  let i = offset;
+  while (i < buf.length) {
+    const byte = buf[i++];
+    value |= (byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) return { value, offset: i };
+    shift += 7;
+    if (shift > 35) return null;
   }
+  return null;
+}
+
+export async function readReplayHeader(filePath: string): Promise<ReplayHeader | null> {
+  const buf = await readFile(filePath).catch(() => null);
+  if (!buf || buf.length < 12) return null;
+
+  const magicU16 = buf.readUInt16LE(0);
+  const isMagicPM = magicU16 === 0x504d || magicU16 === 0x4d50;
+  if (isMagicPM) {
+    if (buf.length < 14) return null;
+    const chartId = buf.readUInt32LE(2);
+    const userId = buf.readUInt32LE(6);
+    const recordId = buf.readUInt32LE(10);
+    return { chartId, userId, recordId };
+  }
+
+  const isMagicPHIRAREC = buf.length >= 8 && buf.subarray(0, 8).toString("ascii") === "PHIRAREC";
+  if (isMagicPHIRAREC) {
+    if (buf.length < 20) return null;
+    const recordId = buf.readUInt32LE(12);
+    const chartId = buf.readUInt32LE(16);
+
+    const chartNameLen = readUlebNumber(buf, 20);
+    if (!chartNameLen) return null;
+    let offset = chartNameLen.offset + chartNameLen.value;
+    if (offset + 4 > buf.length) return null;
+
+    const userId = buf.readInt32LE(offset);
+    if (userId < 0) return null;
+    return { chartId, userId, recordId };
+  }
+
+  const chartId = buf.readUInt32LE(0);
+  const userId = buf.readUInt32LE(4);
+  const recordId = buf.readUInt32LE(8);
+  return { chartId, userId, recordId };
 }
 
 function parseTimestampFromName(name: string): number | null {

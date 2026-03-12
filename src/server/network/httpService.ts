@@ -1292,7 +1292,13 @@ export async function startHttpService(opts: { state: ServerState; host: string;
           state.logger.info(tl(state.serverLang, "log-room-game-start", { room: room.id, users: usersText, monitorsSuffix }));
           await room.send((c) => broadcastRoomAll(room.id, c), { type: "StartPlaying" });
           room.resetGameTime((id) => state.users.get(id));
-          if (state.replayEnabled && room.replayEligible) await state.replayRecorder.startRoom(room.id, room.chart!.id, room.userIds());
+          if (state.replayEnabled && room.replayEligible) {
+            const users = room.userIds()
+              .map((id) => state.users.get(id))
+              .filter((it): it is { id: number; name: string } => Boolean(it))
+              .map((it) => ({ id: it.id, name: it.name }));
+            await state.replayRecorder.startRoom(room.id, { id: room.chart!.id, name: room.chart!.name }, users);
+          }
           room.state = { type: "Playing", results: new Map(), aborted: new Set() };
           await room.onStateChange((c) => broadcastRoomAll(room.id, c));
           await room.notifyWebSocket(state);

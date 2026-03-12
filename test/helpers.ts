@@ -1,6 +1,6 @@
 // 共享的测试工具函数
-import { decodePacket } from "../src/common/binary.js";
-import { decodeClientCommand, type ClientCommand } from "../src/common/commands.js";
+import { BinaryReader, decodePacket } from "../src/common/binary.js";
+import { decodeClientCommand, type ClientCommand, type JudgeEvent, type TouchFrame } from "../src/common/commands.js";
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -15,7 +15,83 @@ export async function waitFor(cond: () => boolean, timeoutMs = 1000): Promise<vo
   throw new Error("等待超时");
 }
 
+export type ParsedPhiraRecHeader = {
+  format: "pm" | "jphirarec";
+  chartId: number;
+  userId: number;
+  recordId: number;
+};
+
+function parsePmHeader(buf: Buffer): ParsedPhiraRecHeader | null {
+  if (buf.length < 14) return null;
+  const magic = buf.readUInt16LE(0);
+  if (magic !== 0x504d && magic !== 0x4d50) return null;
+  return {
+    format: "pm",
+    chartId: buf.readUInt32LE(2),
+    userId: buf.readUInt32LE(6),
+    recordId: buf.readUInt32LE(10)
+  };
+}
+
+function parseJPhiraRecHeader(buf: Buffer): ParsedPhiraRecHeader | null {
+  if (buf.length < 20) return null;
+  if (buf.subarray(0, 8).toString("ascii") !== "PHIRAREC") return null;
+  const r = new BinaryReader(buf);
+  r.take(8);
+  r.readU32(); // version
+  const recordId = r.readU32();
+  const chartId = r.readU32();
+  r.readString(); // chartName
+  const userId = r.readI32();
+  return { format: "jphirarec", chartId, userId, recordId };
+}
+
+function decodeTouchFrame(r: BinaryReader): TouchFrame {
+  const time = r.readF32();
+  const points = r.readArray((rr) => {
+    const id = rr.readI8();
+    const pos = rr.readCompactPos();
+    return [id, pos] as [number, { x: number; y: number }];
+  });
+  return { time, points };
+}
+
+function decodeJudgeEvent(r: BinaryReader): JudgeEvent {
+  const time = r.readF32();
+  const line_id = r.readU32();
+  const note_id = r.readU32();
+  const judgement = r.readU8() as JudgeEvent["judgement"];
+  return { time, line_id, note_id, judgement };
+}
+
+export function parsePhiraRecHeader(buf: Buffer): ParsedPhiraRecHeader {
+  const pm = parsePmHeader(buf);
+  if (pm) return pm;
+  const j = parseJPhiraRecHeader(buf);
+  if (j) return j;
+  throw new Error("unknown-phirarec-header");
+}
+
 export function parsePhiraRec(buf: Buffer): ClientCommand[] {
+  const header = parsePhiraRecHeader(buf);
+  if (header.format === "jphirarec") {
+    const r = new BinaryReader(buf);
+    r.take(8);
+    r.readU32(); // version
+    r.readU32(); // recordId
+    r.readU32(); // chartId
+    r.readString(); // chartName
+    r.readI32(); // userId
+    r.readString(); // userName
+    const frames = r.readArray(decodeTouchFrame);
+    const judges = r.readArray(decodeJudgeEvent);
+    return [
+      { type: "Touches", frames },
+      { type: "Judges", judges }
+    ];
+  }
+
   const out: ClientCommand[] = [];
   let offset = 14;
   while (offset + 4 <= buf.length) {

@@ -5,7 +5,7 @@ import { readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Client } from "../src/client/client.js";
 import { startServer } from "../src/server/core/server.js";
-import { sleep, waitFor, setupMockFetch, parsePhiraRec } from "./helpers.js";
+import { sleep, waitFor, setupMockFetch, parsePhiraRec, parsePhiraRecHeader } from "./helpers.js";
 import type { JudgeEvent, TouchFrame } from "../src/common/commands.js";
 
 describe("回放录制", () => {
@@ -134,10 +134,8 @@ describe("回放录制", () => {
 
       const filePath = join(dir, files[0]!);
       const buf = await readFile(filePath);
-      expect(buf.readUInt16LE(0)).toBe(0x504d);
-      expect(buf.readUInt32LE(2)).toBe(1);
-      expect(buf.readUInt32LE(6)).toBe(100);
-      expect(buf.readUInt32LE(10)).toBe(1);
+      const header = parsePhiraRecHeader(buf);
+      expect(header).toEqual({ format: "jphirarec", chartId: 1, userId: 100, recordId: 1 });
 
       const authRes = await originalFetch(`http://127.0.0.1:${httpPort}/replay/auth`, {
         method: "POST",
@@ -155,10 +153,8 @@ describe("回放录制", () => {
       const dl = await originalFetch(`http://127.0.0.1:${httpPort}/replay/download?sessionToken=${encodeURIComponent(authRes.sessionToken)}&chartId=1&timestamp=${ts}`);
       expect(dl.status).toBe(200);
       const dlBuf = Buffer.from(await dl.arrayBuffer());
-      expect(dlBuf.readUInt16LE(0)).toBe(0x504d);
-      expect(dlBuf.readUInt32LE(2)).toBe(1);
-      expect(dlBuf.readUInt32LE(6)).toBe(100);
-      expect(dlBuf.readUInt32LE(10)).toBe(1);
+      const dlHeader = parsePhiraRecHeader(dlBuf);
+      expect(dlHeader).toEqual({ format: "jphirarec", chartId: 1, userId: 100, recordId: 1 });
 
       const delRes = await originalFetch(`http://127.0.0.1:${httpPort}/replay/delete`, {
         method: "POST",
