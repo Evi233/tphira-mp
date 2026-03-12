@@ -698,9 +698,10 @@ export function startCli(ctx: CliContext): () => void {
       room.resetGameTime((id) => ctx.state.users.get(id));
       if (ctx.state.replayEnabled && room.replayEligible) {
         const users = room.userIds()
-          .map((id) => ctx.state.users.get(id))
-          .filter((it): it is { id: number; name: string } => Boolean(it))
-          .map((it) => ({ id: it.id, name: it.name }));
+          .flatMap((id) => {
+            const user = ctx.state.users.get(id);
+            return user ? [{ id: user.id, name: user.name }] : [];
+          });
         await ctx.state.replayRecorder.startRoom(room.id, { id: room.chart!.id, name: room.chart!.name }, users);
       }
       room.state = { type: "Playing", results: new Map(), aborted: new Set() };

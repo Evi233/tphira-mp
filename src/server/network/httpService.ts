@@ -1294,9 +1294,10 @@ export async function startHttpService(opts: { state: ServerState; host: string;
           room.resetGameTime((id) => state.users.get(id));
           if (state.replayEnabled && room.replayEligible) {
             const users = room.userIds()
-              .map((id) => state.users.get(id))
-              .filter((it): it is { id: number; name: string } => Boolean(it))
-              .map((it) => ({ id: it.id, name: it.name }));
+              .flatMap((id) => {
+                const user = state.users.get(id);
+                return user ? [{ id: user.id, name: user.name }] : [];
+              });
             await state.replayRecorder.startRoom(room.id, { id: room.chart!.id, name: room.chart!.name }, users);
           }
           room.state = { type: "Playing", results: new Map(), aborted: new Set() };
