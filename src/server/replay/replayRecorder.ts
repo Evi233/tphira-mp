@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
-import { BinaryWriter } from "../../common/binary.js";
+import { BinaryWriter, encodePacket } from "../../common/binary.js";
 import type { JudgeEvent, TouchFrame, UserInfo } from "../../common/commands.js";
+import { encodeClientCommand } from "../../common/commands.js";
 import { roomIdToString, type RoomId } from "../../common/roomId.js";
 import { ensureReplayDir, replayFilePath } from "../replay/replayStorage.js";
 
@@ -17,14 +18,11 @@ export type ReplayUserInfo = {
 type InFlight = {
   roomKey: string;
   userId: number;
-  userName: string;
   chartId: number;
-  chartName: string;
   recordId: number;
   timestamp: number;
   path: string;
-  touchFrames: TouchFrame[];
-  judgeEvents: JudgeEvent[];
+  packets: Buffer[];
 };
 
 export class ReplayRecorder {
@@ -52,14 +50,11 @@ export class ReplayRecorder {
       this.inflightByKey.set(key, {
         roomKey,
         userId,
-        userName: user.name,
         chartId: chart.id,
-        chartName: chart.name,
         recordId: 0,
         timestamp: ts,
         path,
-        touchFrames: [],
-        judgeEvents: []
+        packets: []
       });
       keys.add(key);
     }
@@ -94,25 +89,17 @@ export class ReplayRecorder {
   appendTouches(roomId: RoomId, userId: number, frames: TouchFrame[]): void {
     const it = this.get(roomId, userId);
     if (!it) return;
-    for (const frame of frames) {
-      it.touchFrames.push({
-        time: frame.time,
-        points: frame.points.map(([id, pos]) => [id, { x: pos.x, y: pos.y }] as [number, { x: number; y: number }])
-      });
-    }
+    if (frames.length === 0) return;
+    const payload = encodePacket({ type: "Touches", frames }, encodeClientCommand);
+    it.packets.push(payload);
   }
 
   appendJudges(roomId: RoomId, userId: number, judges: JudgeEvent[]): void {
     const it = this.get(roomId, userId);
     if (!it) return;
-    for (const judge of judges) {
-      it.judgeEvents.push({
-        time: judge.time,
-        line_id: judge.line_id,
-        note_id: judge.note_id,
-        judgement: judge.judgement
-      });
-    }
+    if (judges.length === 0) return;
+    const payload = encodePacket({ type: "Judges", judges }, encodeClientCommand);
+    it.packets.push(payload);
   }
 
   listRoomFiles(roomId: RoomId): Array<{ userId: number; chartId: number; timestamp: number; path: string }> {
@@ -147,30 +134,14 @@ export class ReplayRecorder {
 
   private buildPhiraRec(it: InFlight): Buffer {
     const writer = new BinaryWriter();
-    writer.writeBuffer(Buffer.from("PHIRAREC", "ascii"));
-    writer.writeU32(0);
-    writer.writeU32(it.recordId >>> 0);
+    writer.writeU16(0x504d);
     writer.writeU32(it.chartId >>> 0);
-    writer.writeString(it.chartName);
-    writer.writeI32(it.userId | 0);
-    writer.writeString(it.userName);
-    writer.writeArray(it.touchFrames, this.encodeTouchFrame);
-    writer.writeArray(it.judgeEvents, this.encodeJudgeEvent);
+    writer.writeU32(it.userId >>> 0);
+    writer.writeU32(it.recordId >>> 0);
+    for (const payload of it.packets) {
+      writer.writeU32(payload.length);
+      writer.writeBuffer(payload);
+    }
     return writer.toBuffer();
-  }
-
-  private encodeTouchFrame(writer: BinaryWriter, frame: TouchFrame): void {
-    writer.writeF32(frame.time);
-    writer.writeArray(frame.points, (ww, [id, pos]) => {
-      ww.writeI8(id);
-      ww.writeCompactPos(pos);
-    });
-  }
-
-  private encodeJudgeEvent(writer: BinaryWriter, judge: JudgeEvent): void {
-    writer.writeF32(judge.time);
-    writer.writeU32(judge.line_id);
-    writer.writeU32(judge.note_id);
-    writer.writeU8(judge.judgement);
   }
 }

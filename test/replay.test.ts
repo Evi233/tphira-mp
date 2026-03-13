@@ -135,7 +135,7 @@ describe("回放录制", () => {
       const filePath = join(dir, files[0]!);
       const buf = await readFile(filePath);
       const header = parsePhiraRecHeader(buf);
-      expect(header).toEqual({ format: "jphirarec", chartId: 1, userId: 100, recordId: 1 });
+      expect(header).toEqual({ format: "pm", chartId: 1, userId: 100, recordId: 1 });
 
       const authRes = await originalFetch(`http://127.0.0.1:${httpPort}/replay/auth`, {
         method: "POST",
@@ -154,7 +154,7 @@ describe("回放录制", () => {
       expect(dl.status).toBe(200);
       const dlBuf = Buffer.from(await dl.arrayBuffer());
       const dlHeader = parsePhiraRecHeader(dlBuf);
-      expect(dlHeader).toEqual({ format: "jphirarec", chartId: 1, userId: 100, recordId: 1 });
+      expect(dlHeader).toEqual({ format: "pm", chartId: 1, userId: 100, recordId: 1 });
 
       const delRes = await originalFetch(`http://127.0.0.1:${httpPort}/replay/delete`, {
         method: "POST",
